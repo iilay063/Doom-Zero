@@ -1,0 +1,5 @@
+vizdoom
+gymnasium
+stable-baselines3
+opencv-python
+shimmy
