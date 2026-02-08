@@ -1,29 +1,32 @@
-# Doom-Zero: Reinforcement Learning in VizDoom
+# Doom-Zero: Reinforcement Learning Agent for VizDoom
 
-A deep learning project that trains an AI agent to play Doom using Curriculum Learning and Proximal Policy Optimization (PPO).
+A deep reinforcement learning project that trains an AI agent to play Doom scenarios using PPO (Proximal Policy Optimization).
 
-## Project Goal
+## Project Overview
 
-Train an AI agent to progressively master increasingly difficult Doom scenarios:
-1. **Basic**: Learn to shoot a stationary target
-2. **Defend the Center**: Learn to turn and shoot approaching enemies
-3. **Deadly Corridor**: Learn to navigate and survive
-4. **Freedoom**: Apply learned skills to the full game
+This project demonstrates:
+- **Gymnasium Environment Wrapper** - Custom environment bridging VizDoom and Stable Baselines 3
+- **Transfer Learning** - Universal action space allowing models to transfer between scenarios
+- **Reward Shaping** - Custom rewards to encourage desired behavior (combat over rushing)
+- **Parallel Training** - Multi-environment support for faster training
 
-## Files
+## Project Structure
 
-| File | Purpose |
-|------|---------|
-| `doom_env.py` | Gymnasium environment wrapper for VizDoom |
-| `train.py` | Training script using PPO algorithm |
-| `play.py` | Demo script to watch trained agent |
-| `scenarios/` | VizDoom scenario configuration files |
-| `models/` | Saved trained models |
+```
+Doom-Zero/
+├── doom_env.py      # Gymnasium wrapper for VizDoom
+├── train.py         # Training script with PPO
+├── play.py          # Demo script to watch trained agent
+├── scenarios/       # VizDoom scenario files (.cfg, .wad)
+├── models/          # Trained model checkpoints
+│   └── best/        # Best model from training
+└── requirements.txt # Python dependencies
+```
 
 ## Setup
 
 ```bash
-# Create conda environment
+# Create environment
 conda create -n doom-rl python=3.10
 conda activate doom-rl
 
@@ -31,50 +34,75 @@ conda activate doom-rl
 pip install vizdoom stable-baselines3 gymnasium opencv-python
 ```
 
-## Usage
+## Quick Start
 
-### Step 1: Copy Scenarios
-Copy VizDoom scenarios to the `scenarios/` folder:
-```python
-import shutil, vizdoom.scenarios as s, os
-for f in os.listdir(s.__path__[0]):
-    if f.endswith(('.cfg', '.wad')):
-        shutil.copy(os.path.join(s.__path__[0], f), 'scenarios/')
+### 1. Copy Scenario Files
+```bash
+python setup_scenarios.py
 ```
 
-### Step 2: Train on Basic Scenario
+### 2. Train an Agent
 ```bash
+# Train on basic scenario (shoot stationary target)
 python train.py --scenario basic --steps 100000
+
+# Train on corridor with parallel environments (faster)
+python train.py --scenario corridor --steps 500000 --num-envs 6
 ```
 
-### Step 3: Watch the Agent
+### 3. Watch the Agent Play
 ```bash
-python play.py --model models/doom_agent --scenario basic
+python play.py --model models/best/best_model --scenario corridor
 ```
 
-### Step 4: Continue Training on Harder Scenario
-```bash
-python train.py --scenario defend --load models/doom_agent --steps 200000
-```
+## Scenarios
 
-### Step 5: Repeat
-Continue the cycle until the agent masters all scenarios.
+| Scenario | Description | Difficulty |
+|----------|-------------|------------|
+| `basic` | Shoot a stationary target | Easy |
+| `defend` | Survive waves of enemies | Medium |
+| `corridor` | Navigate corridor while fighting | Hard |
 
-## Technical Details
+## Key Design Decisions
 
 ### Universal Action Space
-The `doom_env.py` uses a fixed 7-action space across all scenarios. This enables transfer learning between scenarios with different button configurations.
+The environment exposes 7 actions regardless of scenario:
+- MOVE_LEFT, MOVE_RIGHT, ATTACK
+- MOVE_FORWARD, MOVE_BACKWARD
+- TURN_LEFT, TURN_RIGHT
 
-### PPO Algorithm
-We use Proximal Policy Optimization from Stable Baselines 3:
-- Policy: CNN-based (CnnPolicy)
-- Learning Rate: 0.0001
-- Batch Size: 64
+This allows a model trained on `basic` to be fine-tuned on `corridor` even though they have different button configs.
+
+### Reward Shaping
+For combat scenarios, we add:
+- **Kill bonus**: +150 per enemy killed
+- **Step penalty**: -5 per alive enemy per step (discourages rushing)
+
+This teaches the agent to prioritize combat over just running to the goal.
 
 ### Observation Preprocessing
-- Resolution: 640x480 → 160x120
-- Color: RGB → Grayscale
-- Frame Skip: 4 tics per action
+- Original: 640x480 RGB
+- Processed: 160x120 Grayscale
+- Frame skip: 4 tics per action
 
-## Author
-Student Deep Learning Project
+## Training Results
+
+| Scenario | Training Steps | Mean Reward |
+|----------|---------------|-------------|
+| Basic | 100k | ~90 |
+| Corridor | 1M | ~300-400 |
+
+## PPO Hyperparameters
+
+```python
+learning_rate = 0.00025
+n_steps = 2048
+batch_size = 64
+ent_coef = 0.01
+```
+
+## References
+
+- [VizDoom](https://github.com/Farama-Foundation/ViZDoom)
+- [Stable Baselines 3](https://stable-baselines3.readthedocs.io/)
+- [PPO Paper](https://arxiv.org/abs/1707.06347)

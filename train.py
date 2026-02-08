@@ -1,35 +1,29 @@
 """
-train.py - Training Script for Doom RL Agent
+train.py - PPO Training Script for Doom Agent
 
-This script trains a PPO (Proximal Policy Optimization) agent on a specified
-VizDoom scenario. It demonstrates:
-1. Environment setup with Gymnasium wrappers
-2. Model initialization/loading for transfer learning
-3. Callback system for logging and evaluation
-4. Model saving for later use
+Trains a neural network to play Doom using Proximal Policy Optimization.
+Supports:
+- Multiple scenarios (basic, defend, corridor)
+- Parallel environments for faster training
+- Loading/saving models for incremental training
+- Periodic evaluation to save the best model
 
-Usage:
+Example usage:
     python train.py --scenario basic --steps 100000
-    python train.py --scenario defend --load models/doom_agent --steps 200000
-
-Author: Student Project
+    python train.py --scenario corridor --load models/basic --steps 500000 --num-envs 6
 """
 
 import argparse
 import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 
 from doom_env import DoomEnv
 
 
-# =============================================================================
-# SCENARIO CONFIGURATIONS
-# =============================================================================
-# Maps friendly names to scenario files for easy command-line usage
-
+# Map simple names to scenario files
 SCENARIOS = {
     "basic": "basic.cfg",
     "defend": "defend_the_center.cfg",
@@ -39,50 +33,58 @@ SCENARIOS = {
 
 
 class RewardLoggingCallback(BaseCallback):
-    """
-    Prints each non-zero reward so you can see kills, deaths, etc.
-    The PPO output already shows ep_rew_mean for average tracking.
-    """
+    """Prints rewards during training so you can see kills/deaths happening."""
+    
     def __init__(self, verbose=0):
         super().__init__(verbose)
 
     def _on_step(self) -> bool:
         reward = self.locals.get("rewards", [0])[0]
-        
         if reward != 0:
             sign = "+" if reward > 0 else ""
             print(f"  Reward: {sign}{reward:.1f}", flush=True)
-        
         return True
 
 
-def create_env(scenario_name, visible=False):
-    """Create a wrapped DoomEnv for training."""
+def create_env(scenario_name, visible=False, n_envs=1):
+    """
+    Create the training environment(s).
+    
+    Args:
+        scenario_name: Which scenario to use
+        visible: Show game window (only works with n_envs=1)
+        n_envs: Number of parallel environments
+    """
     scenario_file = SCENARIOS.get(scenario_name, scenario_name)
     
     def make_env():
         env = DoomEnv(scenario_path=scenario_file, visible=visible)
-        env = Monitor(env)  # Wraps env to log episode stats
+        env = Monitor(env)  # Wraps env to track episode stats
         return env
     
-    return DummyVecEnv([make_env])
+    if n_envs == 1:
+        return DummyVecEnv([make_env])
+    else:
+        # SubprocVecEnv runs each env in its own process
+        return SubprocVecEnv([make_env for _ in range(n_envs)])
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train Doom RL Agent")
     parser.add_argument("--scenario", type=str, required=True,
-                        help="Scenario name (basic, defend, corridor) or path to .cfg")
+                        help="Scenario: basic, defend, corridor, or path to .cfg")
     parser.add_argument("--steps", type=int, default=100000,
                         help="Total training timesteps")
     parser.add_argument("--load", type=str, default=None,
-                        help="Path to existing model to continue training")
+                        help="Path to model to continue training from")
     parser.add_argument("--save", type=str, default="models/doom_agent",
-                        help="Path to save the trained model")
+                        help="Where to save the trained model")
     parser.add_argument("--render", action="store_true",
                         help="Show game window during training")
+    parser.add_argument("--num-envs", type=int, default=1,
+                        help="Parallel environments (more = faster, use 6-8)")
     args = parser.parse_args()
 
-    # Create directories
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
 
@@ -91,41 +93,45 @@ def main():
     print(f"{'='*50}")
     print(f"Scenario: {args.scenario}")
     print(f"Timesteps: {args.steps}")
+    print(f"Parallel envs: {args.num_envs}")
     print(f"Load from: {args.load or 'New model'}")
     print(f"Save to: {args.save}")
     print(f"{'='*50}\n")
 
-    # Create environment
-    env = create_env(args.scenario, visible=args.render)
-    
-    # Create evaluation environment (for EvalCallback)
-    eval_env = create_env(args.scenario, visible=False)
+    # Can't render multiple environments at once
+    if args.num_envs > 1 and args.render:
+        print("Warning: --render disabled for parallel training")
+        args.render = False
 
-    # Initialize or load model
+    env = create_env(args.scenario, visible=args.render, n_envs=args.num_envs)
+    eval_env = create_env(args.scenario, visible=False, n_envs=1)
+
+    # Load existing model or create new one
     if args.load and os.path.exists(args.load + ".zip"):
-        print(f"Loading existing model from {args.load}...")
+        print(f"Loading model from {args.load}...")
         model = PPO.load(args.load, env=env)
-        # FORCE moderate entropy on loaded models to encourage exploration
+        # Bump up exploration when continuing training
         model.ent_coef = 0.1
         model.learning_rate = 0.0001
-        print(f"Entropy coefficient set to {model.ent_coef} for exploration")
     else:
         print("Creating new PPO model...")
         model = PPO(
-            policy="CnnPolicy",
+            policy="CnnPolicy",  # CNN to process game images
             env=env,
             verbose=1,
-            learning_rate=0.00003,  # Lower for stable overnight training
-            n_steps=2048,
+            learning_rate=0.00025,
+            n_steps=2048,        # Steps per update
             batch_size=64,
-            ent_coef=0.1,  # Moderate entropy for balanced exploration
+            ent_coef=0.01,       # Entropy bonus for exploration
         )
 
-    # Setup callbacks
+    # Callbacks for logging and saving best model
     reward_callback = RewardLoggingCallback()
+    
+    best_model_dir = os.path.dirname(args.save) or "models"
     eval_callback = EvalCallback(
         eval_env,
-        best_model_save_path="models/best/",
+        best_model_save_path=best_model_dir + "/best/",
         eval_freq=5000,
         n_eval_episodes=10,
         deterministic=True,
@@ -138,11 +144,9 @@ def main():
         callback=[reward_callback, eval_callback],
     )
 
-    # Save final model
     model.save(args.save)
     print(f"\nModel saved to {args.save}.zip")
 
-    # Cleanup
     env.close()
     eval_env.close()
 

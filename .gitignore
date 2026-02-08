@@ -2,19 +2,21 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # IDEs
 .vscode/
 .idea/
 
-# Models & Checkpoints (Large files)
-models/
-*.zip
+# VizDoom generated
+_vizdoom.ini
 
-# VizDoom Scenarios (optional: if you modified them, keep them. If default, maybe ignore? Keeping for safety)
-# *.cfg
-# *.wad
+# Logs (not needed for submission)
+logs/
 
-# System
+# System files
 Thumbs.db
 Desktop.ini
+.DS_Store
+
+# Note: models/ is NOT ignored - professor needs trained models
