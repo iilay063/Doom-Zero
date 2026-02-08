@@ -61,6 +61,7 @@ python play.py --model models/best/best_model --scenario corridor
 |----------|-------------|------------|
 | `basic` | Shoot a stationary target | Easy |
 | `defend` | Survive waves of enemies | Medium |
+| `home` | Navigate maze to find goal | Medium |
 | `corridor` | Navigate corridor while fighting | Hard |
 
 ## Key Design Decisions
@@ -90,15 +91,17 @@ This teaches the agent to prioritize combat over just running to the goal.
 | Scenario | Training Steps | Mean Reward |
 |----------|---------------|-------------|
 | Basic | 100k | ~90 |
-| Corridor | 1M | ~300-400 |
+| Defend | 800k | ~100 |
+| Home | 2M | ~10 |
+| Corridor | 8M | ~-200 |
 
 ## PPO Hyperparameters
 
 ```python
-learning_rate = 0.00025
+learning_rate = 0.00025 - 0.001 (depends on scenario)
 n_steps = 2048
-batch_size = 64
-ent_coef = 0.01
+batch_size = 128
+ent_coef = 0.01 - 0.15 (depends on scenario)
 ```
 
 ## References
